@@ -1,0 +1,223 @@
+#!/bin/sh
+#
+# openfire	Stops and starts the service.
+#
+# chkconfig: 2345 99 1
+# description: 
+# config: /etc/sysconfig/SRV_NAME
+# pidfile: /var/run/SRV_NAME.pid
+# 
+# This script has currently been tested on Redhat, CentOS, and Fedora  based
+# systems.
+#
+
+#####
+# Begin setup work
+#####
+
+# Initialization
+PATH="/sbin:/bin:/usr/bin:/usr/sbin"
+RETVAL=0
+SRV_NAME="updmp"
+HOME_DIR=`pwd`
+
+# Check that we are root ... so non-root users stop here.
+if [ "`id -u`" != 0 ]; then
+	echo $SRV_NAME must be run as root
+	exit 1
+fi
+
+# Get config.
+[ -f "/etc/sysconfig/$SRV_NAME" ] && . /etc/sysconfig/$SRV_NAME
+if [ -f "/etc/init.d/functions" ]; then
+  FUNCTIONS_FOUND=true
+  . /etc/init.d/functions
+fi
+
+# If openfire user is not set in sysconfig, set to root.
+[ -z "$SRV_USER" ] && SRV_USER="root"
+
+# If pid file path is not set in sysconfig, set to /var/run/$SRV_NAME.pid.
+[ -z "$PIDFILE" ] && PIDFILE="/var/run/$SRV_NAME.pid"
+
+# -----------------------------------------------------------------
+
+# If a openfire home variable has not been specified, try to determine it.
+if [ -z "$HOME_DIR" -o ! -d "$HOME_DIR" ]; then
+	if [ -d "/usr/share/$SRV_NAME" ]; then
+		HOME_DIR="/usr/share/$SRV_NAME"
+	elif [ -d "/usr/local/$SRV_NAME" ]; then
+		HOME_DIR="/usr/local/$SRV_NAME"
+	elif [ -d "/opt/$SRV_NAME" ]; then
+		HOME_DIR="/opt/$SRV_NAME"
+	else
+		echo "Could not find $SRV_NAME installation under /opt, /usr/share, or /usr/local."
+		echo "Please specify the $SRV_NAME installation location as variable HOME_DIR"
+		echo "in /etc/sysconfig/$SRV_NAME."
+		exit 1
+	fi
+fi
+
+# If log path is not set in sysconfig, set to $HOME_DIR/logs.
+[ -z "$SRV_LOGDIR" ] && SRV_LOGDIR="${HOME_DIR}/logs"
+
+if [ ! -d "$SRV_LOGDIR" ]; then
+	mkdir $SRV_LOGDIR
+fi
+
+# Attempt to locate java installation.
+if [ -z "$JAVA_HOME" ]; then
+	if [ -d "${HOME_DIR}/jre" ]; then
+		JAVA_HOME="${HOME_DIR}/jre"
+	elif [ -d "/etc/alternatives/jre" ]; then
+		JAVA_HOME="/etc/alternatives/jre"
+	else
+		jdks=`ls -r1d /usr/java/j*`
+		for jdk in $jdks; do
+			if [ -f "${jdk}/bin/java" ]; then
+				JAVA_HOME="$jdk"
+				break
+			fi
+		done
+	fi
+fi
+JAVACMD="${JAVA_HOME}/bin/java"
+
+if [ ! -d "$JAVA_HOME" -o ! -x "$JAVACMD" ]; then
+	echo "Error: JAVA_HOME is not defined correctly."
+	echo "       Can not sure execute $JAVACMD."
+	exit 1
+fi
+
+# Prepare location of openfire libraries
+SRV_LIB="${HOME_DIR}/lib"
+
+# Prepare openfire command line
+SRV_OPTS="${SRV_OPTS} -DHomeDir=${HOME_DIR} -Dsrv.lib.dir=${SRV_LIB}"
+
+# Prepare local java class path
+if [ -z "$LOCALCLASSPATH" ]; then
+	LOCALCLASSPATH="${SRV_LIB}/startup.jar"
+else
+	LOCALCLASSPATH="${SRV_LIB}/startup.jar:${LOCALCLASSPATH}"
+fi
+
+# Export any necessary variables
+export JAVA_HOME JAVACMD
+
+# Lastly, prepare the full command that we are going to run.
+SRV_RUN_CMD="${JAVACMD} -server ${SRV_OPTS} -classpath \"${HOME_DIR}\" org.springframework.boot.loader.JarLauncher"
+
+#####
+# End setup work
+#####
+
+
+
+start() {
+	OLD_PWD=`pwd`
+	cd $SRV_LOGDIR
+
+	PID=$(findPID)
+	if [ -n "$PID" ]; then                                                
+	    echo "$SRV_NAME is already running."                                 
+	    RETVAL=1                                                           
+	    return                                                             
+	fi                                                                     
+
+	# Start daemons.                                                       
+	echo -n "Starting $SRV_NAME: "                                          
+
+	rm -f nohup.out
+	daemon "su -s /bin/sh -c \"nohup $SRV_RUN_CMD > $SRV_LOGDIR/nohup.out 2>&1 &\" $SRV_USER"
+	RETVAL=$?
+
+	echo
+
+	[ $RETVAL -eq 0 -a -d /var/lock/subsys ] && touch /var/lock/subsys/$SRV_NAME
+
+	sleep 1 # allows prompt to return
+
+	PID=$(findPID)
+	echo $PID > $PIDFILE
+
+	cd $OLD_PWD
+}
+
+stop() {
+	PID=$(findPID)
+	if [ -z "$PID" ]; then                                                
+	    echo "$SRV_NAME is not running."                                 
+	    return                                                             
+	fi                                                                     
+
+	# Stop daemons.
+	echo -n "Shutting down $SRV_NAME: "
+
+	if [ -f "$PIDFILE" ]; then
+		killproc -p $PIDFILE -d 10
+		rm -f $PIDFILE
+	else
+		PID=$(findPID)
+		if [ -n $PID ]; then
+			kill $PID
+		else
+			echo "$SRV_NAME is not running."
+		fi
+	fi
+	
+	RETVAL=$?
+	echo
+
+	[ $RETVAL -eq 0 -a -f "/var/lock/subsys/$SRV_NAME" ] && rm -f /var/lock/subsys/$SRV_NAME
+}
+
+restart() {
+	stop
+	sleep 5 # give it a few moments to shut down
+	start
+}
+
+condrestart() {
+	[ -e "/var/lock/subsys/$SRV_NAME" ] && restart
+	return 0
+}
+
+status() {
+	PID=$(findPID)
+	if [ -n "$PID" ]; then
+		echo "$SRV_NAME is running"
+		RETVAL=0
+	else 
+		echo "$SRV_NAME is not running"
+		RETVAL=1
+	fi
+}
+
+findPID() {
+	echo `ps ax --width=1000 | grep java | grep $SRV_NAME | awk '{print $1}'`
+}
+
+# Handle how we were called.
+case "$1" in
+	start)
+		start
+		;;
+	stop)
+		stop
+		;;
+	restart)
+		restart
+		;;
+	condrestart)
+		condrestart
+		;;
+	status) 
+		status
+		;;
+	*)
+		echo "Usage $0 {start|stop|restart|status|condrestart}"
+		RETVAL=1
+esac
+
+exit $RETVAL

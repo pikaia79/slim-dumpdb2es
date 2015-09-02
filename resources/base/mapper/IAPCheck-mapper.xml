@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//ibatis.apache.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.cpg.iapcheck.dao.IAPCheckDao">
+    <!--  -->
+    <select id="find" parameterType="java.lang.String" resultType="IAPCheckVo">
+		SELECT * FROM t_iap_check WHERE id = #{id};
+    </select>
+
+    <insert id="add" parameterType="IAPCheckVo">
+        insert into t_iap_check (id, receipt, mobile, checkedResult, checkedTime, cost)
+        values (#{id}, #{receipt}, #{mobile}, #{checkedResult}, #{checkedTime}, #{cost})
+    </insert>
+
+    <delete id="delete" parameterType="java.lang.String">
+        DELETE FROM t_iap_check WHERE id = #{id}
+    </delete>
+
+    <update id="update" parameterType="IAPCheckVo">
+        update t_iap_check
+        <set>
+            <if test="checkedTime != null">checkedTime=#{checkedTime},</if>
+            <if test="checkedResult != null">checkedResult=#{checkedResult},</if>
+        </set>
+        where id = #{id}
+    </update>
+</mapper>

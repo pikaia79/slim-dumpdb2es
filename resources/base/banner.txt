@@ -1,0 +1,2 @@
+Welcome to Dump DB2ES Service
+version: ${application.version}
